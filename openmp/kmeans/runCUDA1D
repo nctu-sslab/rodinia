@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -ue
+
+#./kmeansCUDA1D -i ../../data/kmeans/kdd_cup
+./kmeansCUDA1D -i data
