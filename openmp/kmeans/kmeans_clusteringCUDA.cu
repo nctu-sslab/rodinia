@@ -82,6 +82,7 @@
 #define FLT_MAX 3.40282347e+38
 #endif
 
+#ifndef AT
 /*----< euclid_dist_2() >----------------------------------------------------*/
 /* multi-dimensional spatial Euclid distance square */
 __device__ float euclid_dist_2(float *pt1, float *pt2, int numdims) {
@@ -112,8 +113,7 @@ __device__ int find_nearest_point(float *pt,                  /* [nfeatures] */
     return (index);
 }
 
-
-__global__ void kernel(float **feature,int nfeatures, int nclusters, int npoints, float **clusters, int *membership, float **partial_new_centers_len, float ***partial_new_centers, float *delta) {
+__global__ void kernel(float **feature,int nfeatures, int nclusters, int npoints, float **clusters, int *membership, int **partial_new_centers_len, float ***partial_new_centers, float *delta) {
     int i = blockIdx.x*blockDim.x + threadIdx.x;
     if ( i >= npoints ) {
         return;
@@ -136,6 +136,86 @@ __global__ void kernel(float **feature,int nfeatures, int nclusters, int npoints
         for (int j = 0; j < nfeatures; j++)
             partial_new_centers[tid][index][j] += feature[i][j];
 }
+#else
+
+#define GPUAT(addr) ((typeof addr)LookupAddr(addr))
+
+__device__ void *LookupAddr(void *addr) {
+    int index = 0;
+    struct region *cur;
+    void *result = nullptr;
+    // TODO This can be better
+    while(index < REGION_NUM) {
+        cur = &addr_table[index];
+        if (cur->used == 0) {
+            break;
+        }
+        if (addr >= cur->start && addr <= cur->end) {
+            result = ((char*)addr)+cur->bias;
+            break;
+        }
+        index++;
+    }
+    if (result == nullptr) {
+        printf("Invalid address:%p\n", addr);
+    }
+    //printf("Translate: %p -> %p\n", addr, result);
+    return result;
+}
+/*----< euclid_dist_2() >----------------------------------------------------*/
+/* multi-dimensional spatial Euclid distance square */
+__device__ float euclid_dist_2(float *pt1, float *pt2, int numdims) {
+    int i;
+    float ans = 0.0;
+
+    for (i = 0; i < numdims; i++)
+        ans += (GPUAT(pt1)[i] - GPUAT(pt2)[i]) * (GPUAT(pt1)[i] - GPUAT(pt2)[i]);
+
+    return (ans);
+}
+
+__device__ int find_nearest_point(float *pt,                  /* [nfeatures] */
+                       int nfeatures, float **pts, /* [npts][nfeatures] */
+                       int npts) {
+    int index, i;
+    float min_dist = FLT_MAX;
+
+    /* find the cluster center id with min distance to pt */
+    for (i = 0; i < npts; i++) {
+        float dist;
+        dist = euclid_dist_2(pt, GPUAT(pts)[i], nfeatures); /* no need square root */
+        if (dist < min_dist) {
+            min_dist = dist;
+            index = i;
+        }
+    }
+    return (index);
+}
+
+__global__ void kernel(float **feature,int nfeatures, int nclusters, int npoints, float **clusters, int *membership, int **partial_new_centers_len, float ***partial_new_centers, float *delta) {
+    int i = blockIdx.x*blockDim.x + threadIdx.x;
+    if ( i >= npoints ) {
+        return;
+    }
+        int tid = 0;//omp_get_thread_num();
+        /* find the index of nestest cluster centers */
+        int index = find_nearest_point(GPUAT(feature)[i], nfeatures, clusters,
+                                   nclusters);
+        /* if membership changes, increase delta by 1 */
+        if (GPUAT(membership)[i] != index)
+            (*GPUAT(delta)) += 1.0;
+            //(*delta) += 1.0;
+        /* assign the membership to object i */
+        GPUAT(membership)[i] = index;
+
+        /* update new cluster centers : sum of all objects located
+               within */
+        GPUAT(GPUAT(partial_new_centers_len)[tid])[index]++;
+        for (int j = 0; j < nfeatures; j++)
+            GPUAT(GPUAT(GPUAT(partial_new_centers)[tid])[index])[j] += GPUAT(GPUAT(feature)[i])[j];
+}
+
+#endif
 
 
 extern "C" {
@@ -212,6 +292,7 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
                 (float *)calloc(nfeatures, sizeof(float));
     }
 
+    //clock_start();
     do {
         index = 0;// redundant
         delta = 0.0 + index;
@@ -220,23 +301,20 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
 
 
         // HtoD
+
         DEEP_COPY1D(deltaptr, 1, float);
         DEEP_COPY1D(membership, npoints, int);
 
-        DEEP_COPY2D(feature, npoints, nfeatures);
-        DEEP_COPY2D(clusters, nclusters, nfeatures);
-        DEEP_COPY2D(partial_new_centers_len, nthreads, nclusters);
+        DEEP_COPY2D(feature, npoints, nfeatures, float);
+        DEEP_COPY2D(clusters, nclusters, nfeatures, float);
+        DEEP_COPY2D(partial_new_centers_len, nthreads, nclusters, int);
 
         DEEP_COPY3D(partial_new_centers, nthreads, nclusters, nfeatures);
-/*
-        puts("before Kernel");
-for ( i = 0 ; i < nclusters; i++) {
-            for (j = 0; j < nfeatures; j++) {
-                            printf("%f ", clusters[i][j]);
-                                    }
-                    puts("");
-                        }
-                        */
+
+#ifdef AT
+        transfer_regions(REGION_CPY_H2D);
+        //dump_regions();
+#endif
         // Kernel
         kernel<<<(npoints+511)/512,512>>>(feature_d1, nfeatures, nclusters, npoints, clusters_d1, membership_d1, partial_new_centers_len_d1, partial_new_centers_d1, deltaptr_d1);
         CudaCheckError();
@@ -246,9 +324,9 @@ for ( i = 0 ; i < nclusters; i++) {
         DEEP_BACK1D(deltaptr, 1, float);
         DEEP_BACK1D(membership, npoints, int);
 
-        DEEP_BACK2D(feature, npoints, nfeatures);
-        DEEP_BACK2D(clusters, nclusters, nfeatures);
-        DEEP_BACK2D(partial_new_centers_len, nthreads, nclusters);
+        DEEP_BACK2D(feature, npoints, nfeatures, float);
+        DEEP_BACK2D(clusters, nclusters, nfeatures, float);
+        DEEP_BACK2D(partial_new_centers_len, nthreads, nclusters, int);
 
         DEEP_BACK3D(partial_new_centers, nthreads, nclusters, nfeatures);
 
@@ -261,6 +339,12 @@ for ( i = 0 ; i < nclusters; i++) {
         DEEP_FREE2D(partial_new_centers_len);
 
         DEEP_FREE3D(partial_new_centers);
+
+#ifdef AT
+        transfer_regions(REGION_CPY_D2H);
+#endif
+
+        //print_elapsed();
 
 
         /* let the main thread perform the array reduction */
