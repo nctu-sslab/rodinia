@@ -147,7 +147,7 @@ void new_region(void *_addr, size_t size) {
       regions[index].used = 1;
       regions[index].start = addr;
       regions[index].end = addr+size;
-      printf("create region %d start: %p\n", index, _addr);
+      //printf("create region %d start: %p\n", index, _addr);
     }
 
     // judge range
@@ -193,6 +193,15 @@ enum REGION_CPY {
 
 void transfer_addr_table() {
   CudaSafeCall(cudaMemcpyToSymbol(addr_table, regions, sizeof(struct region)*REGION_NUM));
+}
+
+void ATclean() {
+  int index = 0;
+  while (index < REGION_NUM) {
+    regions[index].used = 0;
+    cudaFree(regions[index].dev_start);
+    index++;
+  }
 }
 
 void transfer_regions(enum REGION_CPY type) {

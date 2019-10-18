@@ -17,15 +17,15 @@ OBJS = $(OBJS1) $(OBJS2) $(OBJ3) $(OBJS4) $(OBJS5)
 all: $(EXE)
 
 kmeans_clusteringCUDA.o: kmeans_clusteringCUDA.cu
-	nvcc $< -o $@ -c
+	nvcc $< -o $@ -c -arch=sm_60
 
 kmeans_clusteringCUDA1D.o: kmeans_clustering1D.c
 	cp $< kmeans_clustering1D.cu
-	nvcc kmeans_clustering1D.cu -c -o $@ -DCUDA
+	nvcc kmeans_clustering1D.cu -c -o $@ -DCUDA -arch=sm_60
 	rm kmeans_clustering1D.cu
 
 kmeans_clusteringCUDA2.o: kmeans_clusteringCUDA.cu
-	nvcc $< -o $@ -c -DAT
+	nvcc $< -o $@ -c -DAT -arch=sm_60
 
 $(EXE1): $(OBJS1)
 

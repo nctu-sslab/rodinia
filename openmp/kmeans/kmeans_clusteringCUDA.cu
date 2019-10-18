@@ -132,7 +132,7 @@ __global__ void kernel(float **feature,int nfeatures, int nclusters, int npoints
 
         /* update new cluster centers : sum of all objects located
                within */
-        partial_new_centers_len[tid][index]++;
+        atomicAdd(&(partial_new_centers_len[tid][index]), 1);
         for (int j = 0; j < nfeatures; j++)
             partial_new_centers[tid][index][j] += feature[i][j];
 }
@@ -210,11 +210,10 @@ __global__ void kernel(float **feature,int nfeatures, int nclusters, int npoints
 
         /* update new cluster centers : sum of all objects located
                within */
-        GPUAT(GPUAT(partial_new_centers_len)[tid])[index]++;
+        atomicAdd(&(GPUAT(GPUAT(partial_new_centers_len)[tid])[index]),1);
         for (int j = 0; j < nfeatures; j++)
-            GPUAT(GPUAT(GPUAT(partial_new_centers)[tid])[index])[j] += GPUAT(GPUAT(feature)[i])[j];
+            atomicAdd(&(GPUAT(GPUAT(GPUAT(partial_new_centers)[tid])[index])[j]), GPUAT(GPUAT(feature)[i])[j]);
 }
-
 #endif
 
 
@@ -299,7 +298,6 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
 
         float *deltaptr = &delta;
 
-
         // HtoD
 
         DEEP_COPY1D(deltaptr, 1, float);
@@ -342,6 +340,7 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
 
 #ifdef AT
         transfer_regions(REGION_CPY_D2H);
+		ATclean();
 #endif
 
         //print_elapsed();
@@ -358,6 +357,16 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
                 }
             }
         }
+/*
+        if (loop==0) {
+            for (int i = 0; i < nclusters; i++) {
+                printf("%d ", new_centers_len[i]);
+                for (int j = 0; j < nfeatures; j++) {
+                }
+            }
+            puts("");
+        }
+*/
 
         /* replace old cluster centers with new_centers */
         for (i = 0; i < nclusters; i++) {
@@ -368,9 +377,8 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
             }
             new_centers_len[i] = 0; /* set back to 0 */
         }
-    printf("Loop: %d\n", loop);
-
     } while (delta > threshold && loop++ < 500);
+    printf("Loop: %d\n", loop);
 
 
     free(new_centers[0]);
