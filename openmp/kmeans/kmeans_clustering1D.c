@@ -71,8 +71,21 @@
 #include <stdlib.h>
 #include <float.h>
 #include <math.h>
-#include "kmeans1D.h"
 #include <omp.h>
+
+#ifdef CUDA
+
+// Avoid modify
+/*extern "C" {
+#include "kmeans1D.h"
+}*/
+#include "CUDAhelper.h"
+
+#else
+#include "kmeans1D.h"
+#endif
+
+
 
 #define RANDOM_MAX 2147483647
 
@@ -84,6 +97,20 @@ extern double wtime(void);
 
 #ifdef CUDA
 // cuda function
+
+/*----< euclid_dist_2() >----------------------------------------------------*/
+/* multi-dimensional spatial Euclid distance square */
+extern "C" {
+__device__ float euclid_dist_2(float *pt1, float *pt2, int numdims) {
+    int i;
+    float ans = 0.0;
+
+    for (i = 0; i < numdims; i++)
+        ans += (pt1[i] - pt2[i]) * (pt1[i] - pt2[i]);
+
+    return (ans);
+}
+
 __device__ int find_nearest_point(float *pt,                  /* [nfeatures] */
                        int nfeatures, float *pts, /* [npts*nfeatures] */
                        int npts) {
@@ -102,19 +129,8 @@ __device__ int find_nearest_point(float *pt,                  /* [nfeatures] */
     return (index);
 }
 
-/*----< euclid_dist_2() >----------------------------------------------------*/
-/* multi-dimensional spatial Euclid distance square */
-__device__ float euclid_dist_2(float *pt1, float *pt2, int numdims) {
-    int i;
-    float ans = 0.0;
 
-    for (i = 0; i < numdims; i++)
-        ans += (pt1[i] - pt2[i]) * (pt1[i] - pt2[i]);
-
-    return (ans);
-}
-
-__global__ void kernel(float *feature,int nfeatures, int nclusters, int npoints, float *clusters, int *membership, float *partial_new_centers_len, float *partial_new_centers, float *delta) {
+__global__ void kernel(float *feature,int nfeatures, int nclusters, int npoints, float *clusters, int *membership, int *partial_new_centers_len, float *partial_new_centers, float *delta) {
     int i = blockIdx.x*blockDim.x + threadIdx.x;
     if ( i >= npoints ) {
         return;
@@ -122,20 +138,21 @@ __global__ void kernel(float *feature,int nfeatures, int nclusters, int npoints,
     //int tid = omp_get_thread_num();
     int tid = 0;//omp_get_thread_num();
         /* find the index of nestest cluster centers */
-        int index = find_nearest_point(feature+i, nfeatures, clusters,
+        int index = find_nearest_point(feature+i*nfeatures, nfeatures, clusters,
                                    nclusters);
         /* if membership changes, increase delta by 1 */
         if (membership[i] != index)
-            (*delta) += 1.0;
+            atomicAdd(delta,1.0);
 
         /* assign the membership to object i */
         membership[i] = index;
 
         /* update new cluster centers : sum of all objects located
                within */
-        (*(partial_new_centers_len+nclusters*tid+index))++;
-        for (int j = 0; j < nfeatures; j++)
-            (*(partial_new_centers+ nfeatures*(nclusters*tid+index)+j)) += *(feature+nfeatures*i+j);
+        atomicAdd(&partial_new_centers_len[nclusters*tid+index], 1);
+        for (int j = 0; j < nfeatures; j++) {
+            atomicAdd(&(partial_new_centers[nfeatures*(nclusters*tid+index)+j]), feature[nfeatures*i+j]);
+        }
 }
 
 #else
@@ -170,7 +187,6 @@ __inline float euclid_dist_2(float *pt1, float *pt2, int numdims) {
 }
 #endif
 
-// TODO
 /*----< kmeans_clustering() >---------------------------------------------*/
 float *kmeans_clustering(float *feature, /* in: [npoints*nfeatures] */
                           int nfeatures, int npoints, int nclusters,
@@ -227,7 +243,7 @@ float *kmeans_clustering(float *feature, /* in: [npoints*nfeatures] */
     //for (i = 1; i < nthreads; i++)
     //    partial_new_centers_len[i] = partial_new_centers_len[i - 1] + nclusters;
 
-    partial_new_centers = (float *)malloc(nthreads * nclusters * nfeatures * sizeof(float ));
+    partial_new_centers = (float *)calloc(nthreads * nclusters * nfeatures, sizeof(float ));
     /*
     partial_new_centers[0] =
         (float **)malloc(nthreads * nclusters * sizeof(float *));
@@ -246,8 +262,37 @@ float *kmeans_clustering(float *feature, /* in: [npoints*nfeatures] */
 #ifdef OMP_OFFLOAD
 //#pragma omp target distribute map(feature[:npoints*nfeatures], clusters[:nclusters*nfeatures],membership[:npoints], partial_new_centers[:nthreads*nclusters*nfeatures], partial_new_centers_len[:nclusters*nfeatures])
 #elif defined CUDA
+        float *deltaptr = &delta;
 
 // 1D CUDA
+
+        //clock_start();
+        DEEP_COPY1D(feature, npoints*nfeatures, float);
+        DEEP_COPY1D(clusters, nclusters*nfeatures, float);
+        DEEP_COPY1D(membership, npoints, int);
+        DEEP_COPY1D(partial_new_centers, nthreads*nclusters*nfeatures, float);
+        DEEP_COPY1D(partial_new_centers_len, nclusters * nfeatures, int);
+        DEEP_COPY1D(deltaptr, 1, float);
+
+        kernel<<<(npoints+511)/512,512>>>(feature_d1, nfeatures, nclusters, npoints, clusters_d1, membership_d1, partial_new_centers_len_d1, partial_new_centers_d1, deltaptr_d1);
+        //kernel<<<1,1>>>(feature_d1, nfeatures, nclusters, npoints, clusters_d1, membership_d1, partial_new_centers_len_d1, partial_new_centers_d1, deltaptr_d1);
+        CudaCheckError();
+        cudaDeviceSynchronize();
+
+        DEEP_BACK1D(feature, npoints*nfeatures, float);
+        DEEP_BACK1D(clusters, nclusters*nfeatures, float);
+        DEEP_BACK1D(membership, npoints, int);
+        DEEP_BACK1D(partial_new_centers_len, nclusters*nfeatures, int);
+        DEEP_BACK1D(deltaptr, 1, float);
+        DEEP_BACK1D(partial_new_centers, nthreads*nclusters*nfeatures, float);
+
+        DEEP_FREE1D(feature);
+        DEEP_FREE1D(clusters);
+        DEEP_FREE1D(membership);
+        DEEP_FREE1D(partial_new_centers);
+        DEEP_FREE1D(partial_new_centers_len);
+        DEEP_FREE1D(deltaptr);
+        //print_elapsed();
 
 #else
 #pragma omp parallel shared(feature, clusters, membership,                     \
@@ -288,6 +333,29 @@ float *kmeans_clustering(float *feature, /* in: [npoints*nfeatures] */
                 }
             }
         }
+#if 0
+        if (loop==0) {
+        int a = 0;
+
+        for (i = 0; i < nclusters; i++) {
+            //printf("%d ", new_centers_len[i]);
+            //a += new_centers_len[i];
+            for (int j = 0; j < nfeatures; j++) {
+                int index = i*nfeatures + j;
+                if (index >= 60 && index <= 70) {
+                    printf("%f ", new_centers[index]);
+                }
+            }
+        }
+        puts("");
+        for (i = 0; i < npoints; i++) {
+            //printf("%d ", membership[i]);
+        }
+        printf("\na: %d npoints: %d delta: %f\n", a, npoints, delta);
+        puts("");
+        break;
+        }
+#endif
 
         /* replace old cluster centers with new_centers */
         for (i = 0; i < nclusters; i++) {
@@ -300,11 +368,15 @@ float *kmeans_clustering(float *feature, /* in: [npoints*nfeatures] */
         }
 
     } while (delta > threshold && loop++ < 500);
+    printf("Loop %d\n", loop);
 
 
-    //free(new_centers[0]);
     free(new_centers);
     free(new_centers_len);
 
     return clusters;
 }
+
+#ifdef CUDA
+}
+#endif

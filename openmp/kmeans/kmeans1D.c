@@ -222,8 +222,6 @@ int main(int argc, char **argv) {
 
     timing = omp_get_wtime();
     for (i = 0; i < nloops; i++) {
-        puts("cluster");
-
         cluster_centres = NULL;
         cluster(numObjects, numAttributes,
                 attributes, /* [numObjects*numAttributes] */
