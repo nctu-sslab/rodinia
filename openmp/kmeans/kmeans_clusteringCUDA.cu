@@ -125,7 +125,7 @@ __global__ void kernel(float **feature,int nfeatures, int nclusters, int npoints
                                    nclusters);
         /* if membership changes, increase delta by 1 */
         if (membership[i] != index)
-            (*delta) += 1.0;
+            atomicAdd(delta,1.0);
 
         /* assign the membership to object i */
         membership[i] = index;
@@ -203,7 +203,7 @@ __global__ void kernel(float **feature,int nfeatures, int nclusters, int npoints
                                    nclusters);
         /* if membership changes, increase delta by 1 */
         if (GPUAT(membership)[i] != index)
-            (*GPUAT(delta)) += 1.0;
+            atomicAdd(GPUAT(delta),1.0);
             //(*delta) += 1.0;
         /* assign the membership to object i */
         GPUAT(membership)[i] = index;
@@ -357,16 +357,22 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
                 }
             }
         }
-/*
+
+        /*
         if (loop==0) {
             for (int i = 0; i < nclusters; i++) {
                 printf("%d ", new_centers_len[i]);
                 for (int j = 0; j < nfeatures; j++) {
                 }
             }
+            int a = 0;
+            for (int i = 0; i < npoints; i++) {
+                a += membership[i];
+            }
             puts("");
         }
-*/
+        */
+
 
         /* replace old cluster centers with new_centers */
         for (i = 0; i < nclusters; i++) {
