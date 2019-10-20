@@ -47,6 +47,7 @@
 
 
 		// 3D function
+    // FIXME
 #define DEEP_COPY3D(NAME, N, M, K)\
 		float ***NAME##_d1, ***NAME##_h1;\
 		float *NAME##_d3;\
@@ -60,8 +61,8 @@
 				NAME##_h1 = (float ***)malloc(N * sizeof(float**));\
 				for (int i = 0; i < N; i++) {\
 						for (int j = 0; j < M; j++) {\
-								CudaSafeCall(cudaMemcpy(NAME##_d3+(i*M+j)*K, &NAME[i][j], K * sizeof(float),cudaMemcpyHostToDevice));\
-								NAME##_h2[j] = NAME##_d3+i*M+j;\
+								CudaSafeCall(cudaMemcpy(NAME##_d3+(i*M+j)*K, NAME[i][j], K * sizeof(float),cudaMemcpyHostToDevice));\
+								NAME##_h2[j] = NAME##_d3+ (i*M+j)*K;\
 						}\
 						CudaSafeCall(cudaMemcpy(NAME##_d2+i*M, NAME##_h2, M * sizeof(float*),cudaMemcpyHostToDevice));\
 						NAME##_h1[i] = NAME##_d2+i*M;\
@@ -74,7 +75,7 @@
 		{\
 				for (int i = 0; i < N; i ++) {\
 						for (int j = 0; j < M; j++) {\
-								CudaSafeCall(cudaMemcpy(NAME[i][j], NAME##_d3+i*M+j, K * sizeof(float), cudaMemcpyDeviceToHost));\
+								CudaSafeCall(cudaMemcpy(NAME[i][j], NAME##_d3+(i*M+j)*K, K * sizeof(float), cudaMemcpyDeviceToHost));\
 						}\
 				}\
 		}\

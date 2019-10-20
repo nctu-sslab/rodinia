@@ -2,3 +2,4 @@
 set -ue
 
 ./kmeans -i ../../data/kmeans/kdd_cup
+#./kmeans -i data

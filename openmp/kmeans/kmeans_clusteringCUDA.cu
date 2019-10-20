@@ -82,14 +82,14 @@
 #define FLT_MAX 3.40282347e+38
 #endif
 
+
 #ifndef AT
 /*----< euclid_dist_2() >----------------------------------------------------*/
 /* multi-dimensional spatial Euclid distance square */
 __device__ float euclid_dist_2(float *pt1, float *pt2, int numdims) {
     int i;
     float ans = 0.0;
-
-    for (i = 0; i < numdims; i++)
+for (i = 0; i < numdims; i++)
         ans += (pt1[i] - pt2[i]) * (pt1[i] - pt2[i]);
 
     return (ans);
@@ -119,7 +119,7 @@ __global__ void kernel(float **feature,int nfeatures, int nclusters, int npoints
         return;
     }
     //int tid = omp_get_thread_num();
-    int tid = 0;//omp_get_thread_num();
+    int tid = 0;
         /* find the index of nestest cluster centers */
         int index = find_nearest_point(feature[i], nfeatures, clusters,
                                    nclusters);
@@ -133,8 +133,9 @@ __global__ void kernel(float **feature,int nfeatures, int nclusters, int npoints
         /* update new cluster centers : sum of all objects located
                within */
         atomicAdd(&(partial_new_centers_len[tid][index]), 1);
-        for (int j = 0; j < nfeatures; j++)
-            partial_new_centers[tid][index][j] += feature[i][j];
+        for (int j = 0; j < nfeatures; j++) {
+            atomicAdd(&(partial_new_centers[tid][index][j]),feature[i][j]);
+        }
 }
 #else
 
@@ -211,8 +212,9 @@ __global__ void kernel(float **feature,int nfeatures, int nclusters, int npoints
         /* update new cluster centers : sum of all objects located
                within */
         atomicAdd(&(GPUAT(GPUAT(partial_new_centers_len)[tid])[index]),1);
-        for (int j = 0; j < nfeatures; j++)
+        for (int j = 0; j < nfeatures; j++) {
             atomicAdd(&(GPUAT(GPUAT(GPUAT(partial_new_centers)[tid])[index])[j]), GPUAT(GPUAT(feature)[i])[j]);
+            }
 }
 #endif
 
@@ -299,7 +301,6 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
         float *deltaptr = &delta;
 
         // HtoD
-
         DEEP_COPY1D(deltaptr, 1, float);
         DEEP_COPY1D(membership, npoints, int);
 
@@ -357,32 +358,19 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
                 }
             }
         }
-
-        /*
-        if (loop==0) {
-            for (int i = 0; i < nclusters; i++) {
-                printf("%d ", new_centers_len[i]);
-                for (int j = 0; j < nfeatures; j++) {
-                }
-            }
-            int a = 0;
-            for (int i = 0; i < npoints; i++) {
-                a += membership[i];
-            }
-            puts("");
-        }
-        */
-
+        
 
         /* replace old cluster centers with new_centers */
         for (i = 0; i < nclusters; i++) {
             for (j = 0; j < nfeatures; j++) {
-                if (new_centers_len[i] > 0)
+                if (new_centers_len[i] > 0) {
                     clusters[i][j] = new_centers[i][j] / new_centers_len[i];
+                }
                 new_centers[i][j] = 0.0; /* set back to 0 */
             }
             new_centers_len[i] = 0; /* set back to 0 */
         }
+    printf("Loop: %d\n", loop);
     } while (delta > threshold && loop++ < 500);
     printf("Loop: %d\n", loop);
 
