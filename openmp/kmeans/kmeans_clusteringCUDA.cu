@@ -158,7 +158,7 @@ __device__ void *LookupAddr(void *addr) {
         index++;
     }
     if (result == nullptr) {
-        printf("Invalid address:%p\n", addr);
+        //printf("Invalid address:%p\n", addr);
     }
     //printf("Translate: %p -> %p\n", addr, result);
     return result;
