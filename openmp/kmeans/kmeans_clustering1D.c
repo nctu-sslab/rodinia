@@ -87,6 +87,7 @@
 
 
 
+
 #define RANDOM_MAX 2147483647
 
 #ifndef FLT_MAX
@@ -199,8 +200,6 @@ float *kmeans_clustering(float *feature, /* in: [npoints*nfeatures] */
     float *clusters;     /* out: [nclusters*nfeatures] */
     float delta;
 
-    double timing;
-
     int nthreads;
     int *partial_new_centers_len;
     float *partial_new_centers;
@@ -257,16 +256,19 @@ float *kmeans_clustering(float *feature, /* in: [npoints*nfeatures] */
     }
     */
 
+    double t0 = 0, t1 = 0, t2 = 0, t3 = 0;
+#ifdef OMP_OFFLOAD
+#pragma omp target enter data map(to:feature[:npoints*nfeatures], membership[:npoints])
+#endif
     do {
         delta = 0.0;
-#ifdef OMP_OFFLOAD
-//#pragma omp target distribute map(feature[:npoints*nfeatures], clusters[:nclusters*nfeatures],membership[:npoints], partial_new_centers[:nthreads*nclusters*nfeatures], partial_new_centers_len[:nclusters*nfeatures])
-#elif defined CUDA
+#if defined CUDA
+        index = 0;
+        delta += index;
         float *deltaptr = &delta;
 
 // 1D CUDA
 
-        //clock_start();
         DEEP_COPY1D(feature, npoints*nfeatures, float);
         DEEP_COPY1D(clusters, nclusters*nfeatures, float);
         DEEP_COPY1D(membership, npoints, int);
@@ -275,7 +277,6 @@ float *kmeans_clustering(float *feature, /* in: [npoints*nfeatures] */
         DEEP_COPY1D(deltaptr, 1, float);
 
         kernel<<<(npoints+511)/512,512>>>(feature_d1, nfeatures, nclusters, npoints, clusters_d1, membership_d1, partial_new_centers_len_d1, partial_new_centers_d1, deltaptr_d1);
-        //kernel<<<1,1>>>(feature_d1, nfeatures, nclusters, npoints, clusters_d1, membership_d1, partial_new_centers_len_d1, partial_new_centers_d1, deltaptr_d1);
         CudaCheckError();
         cudaDeviceSynchronize();
 
@@ -293,7 +294,13 @@ float *kmeans_clustering(float *feature, /* in: [npoints*nfeatures] */
         DEEP_FREE1D(partial_new_centers_len);
         DEEP_FREE1D(deltaptr);
         //print_elapsed();
-
+#else
+#if defined OMP_OFFLOAD
+#pragma omp target enter data map(to: clusters[:nclusters*nfeatures], partial_new_centers[:nthreads*nclusters*nfeatures], partial_new_centers_len[:nclusters*nfeatures])
+        {
+            int tid = 0;
+//#pragma omp target teams distribute parallel for private(i, j, index) firstprivate(npoints, nclusters, nfeatures) reduction(+ : delta)
+#pragma omp target teams distribute parallel for private(i, j, index) firstprivate(npoints, nclusters, nfeatures) reduction(+: delta)
 #else
 #pragma omp parallel shared(feature, clusters, membership,                     \
                             partial_new_centers, partial_new_centers_len)
@@ -301,12 +308,14 @@ float *kmeans_clustering(float *feature, /* in: [npoints*nfeatures] */
             int tid = omp_get_thread_num();
 #pragma omp for private(i, j, index) firstprivate(                             \
     npoints, nclusters, nfeatures) schedule(static) reduction(+ : delta)
+#endif
             for (i = 0; i < npoints; i++) {
                 /* find the index of nestest cluster centers */
                 index = find_nearest_point(feature+i*nfeatures, nfeatures, clusters,
                                            nclusters);
                 /* if membership changes, increase delta by 1 */
                 if (membership[i] != index)
+//#pragma omp atomic
                     delta += 1.0;
 
                 /* assign the membership to object i */
@@ -314,13 +323,19 @@ float *kmeans_clustering(float *feature, /* in: [npoints*nfeatures] */
 
                 /* update new cluster centers : sum of all objects located
                        within */
+#pragma omp atomic
                 partial_new_centers_len[tid*nclusters+index]++;
                 for (j = 0; j < nfeatures; j++) {
+#pragma omp atomic
                     partial_new_centers[(tid*nclusters+index)*nfeatures+j] += feature[i*nfeatures+j];
                 }
             }
         }
 #endif
+#ifdef OMP_OFFLOAD
+#pragma omp target exit data map(from: clusters[:nclusters*nfeatures], partial_new_centers[:nthreads*nclusters*nfeatures], partial_new_centers_len[:nclusters*nfeatures])
+#endif
+
 
         /* let the main thread perform the array reduction */
         for (i = 0; i < nclusters; i++) {
@@ -353,7 +368,7 @@ float *kmeans_clustering(float *feature, /* in: [npoints*nfeatures] */
         }
         printf("\na: %d npoints: %d delta: %f\n", a, npoints, delta);
         puts("");
-        break;
+       break;
         }
 #endif
 
@@ -367,7 +382,10 @@ float *kmeans_clustering(float *feature, /* in: [npoints*nfeatures] */
             new_centers_len[i] = 0; /* set back to 0 */
         }
 
+        printf("%d ", loop);
+        fflush(stdout);
     } while (delta > threshold && loop++ < 500);
+        printf("t0 %lf t1 %lf t2 %lf t3 %lf\n", t0,  t1, t2, t3);
     printf("Loop %d\n", loop);
 
 

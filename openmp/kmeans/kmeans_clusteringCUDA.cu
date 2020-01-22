@@ -73,8 +73,7 @@
 #include <math.h>
 #include <omp.h>
 #include <cuda.h>
-
-#include "CUDAhelper.h"
+#include <stdarg.h>
 
 #define RANDOM_MAX 2147483647
 
@@ -83,7 +82,11 @@
 #endif
 
 
-#ifndef AT
+extern "C" {
+#include "CUDAhelper.h"
+
+
+#if !defined(AT) 
 /*----< euclid_dist_2() >----------------------------------------------------*/
 /* multi-dimensional spatial Euclid distance square */
 __device__ float euclid_dist_2(float *pt1, float *pt2, int numdims) {
@@ -136,6 +139,18 @@ __global__ void kernel(float **feature,int nfeatures, int nclusters, int npoints
         for (int j = 0; j < nfeatures; j++) {
             atomicAdd(&(partial_new_centers[tid][index][j]),feature[i][j]);
         }
+}
+
+__global__ void kernel1(int nfeatures, int nclusters, int npoints, int *membership, float *delta) {
+    int i = blockIdx.x*blockDim.x + threadIdx.x;
+    if ( i >= npoints ) {
+        return;
+    }
+    //int tid = omp_get_thread_num();
+    int tid = 0;
+        /* find the index of nestest cluster centers */
+        /* assign the membership to object i */
+        membership[i] = i;
 }
 #else
 
@@ -193,6 +208,7 @@ __device__ int find_nearest_point(float *pt,                  /* [nfeatures] */
     return (index);
 }
 
+
 __global__ void kernel(float **feature,int nfeatures, int nclusters, int npoints, float **clusters, int *membership, int **partial_new_centers_len, float ***partial_new_centers, float *delta) {
     int i = blockIdx.x*blockDim.x + threadIdx.x;
     if ( i >= npoints ) {
@@ -219,10 +235,6 @@ __global__ void kernel(float **feature,int nfeatures, int nclusters, int npoints
 #endif
 
 
-extern "C" {
-//#include "kmeans.h"
-#define CUDA_ERROR_CHECK
-#include "/home/pschen/sslab/omp_offloading/include/cuda_check.h"
 
 extern double wtime(void);
 
@@ -304,25 +316,41 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
         DEEP_COPY1D(deltaptr, 1, float);
         DEEP_COPY1D(membership, npoints, int);
 
+        printf("npoints: %d\n", npoints);
+
         DEEP_COPY2D(feature, npoints, nfeatures, float);
+        /*
         DEEP_COPY2D(clusters, nclusters, nfeatures, float);
         DEEP_COPY2D(partial_new_centers_len, nthreads, nclusters, int);
 
         DEEP_COPY3D(partial_new_centers, nthreads, nclusters, nfeatures);
+        */
 
-#ifdef AT
+#if defined AT || defined RF
         transfer_regions(REGION_CPY_H2D);
-        //dump_regions();
+        dump_regions();
 #endif
         // Kernel
-        kernel<<<(npoints+511)/512,512>>>(feature_d1, nfeatures, nclusters, npoints, clusters_d1, membership_d1, partial_new_centers_len_d1, partial_new_centers_d1, deltaptr_d1);
-        CudaCheckError();
-        cudaDeviceSynchronize();
+        //kernel<<<(npoints+511)/512,512>>>(feature_d1, nfeatures, nclusters, npoints, clusters_d1, membership_d1, partial_new_centers_len_d1, partial_new_centers_d1, deltaptr_d1);
+#ifdef RF
+        /*
+        for (i = 0; i < 10; i++) {
+            printf("%d ", membership[i]);
+        }
+        */
+        K_LAUNCH((void*)kernel1,npoints+511,512, 0x18,5, &nfeatures, &nclusters, &npoints, &membership, &deltaptr);
+
+
+#endif
 
         // DtoH
         DEEP_BACK1D(deltaptr, 1, float);
         DEEP_BACK1D(membership, npoints, int);
-
+        puts("");
+        for (i = 0; i < 10; i++) {
+            printf("%d ", membership[i]);
+        }
+        /*
         DEEP_BACK2D(feature, npoints, nfeatures, float);
         DEEP_BACK2D(clusters, nclusters, nfeatures, float);
         DEEP_BACK2D(partial_new_centers_len, nthreads, nclusters, int);
@@ -338,9 +366,10 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
         DEEP_FREE2D(partial_new_centers_len);
 
         DEEP_FREE3D(partial_new_centers);
+        */
 
-#ifdef AT
-        transfer_regions(REGION_CPY_D2H);
+#if defined AT || defined RF
+        //transfer_regions(REGION_CPY_D2H);
 		ATclean();
 #endif
 
@@ -373,7 +402,6 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
     printf("Loop: %d\n", loop);
     } while (delta > threshold && loop++ < 500);
     printf("Loop: %d\n", loop);
-
 
     free(new_centers[0]);
     free(new_centers);

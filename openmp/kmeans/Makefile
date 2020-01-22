@@ -2,16 +2,19 @@ include ../common.mk
 
 EXE1  = kmeans
 EXE2 = kmeans1D
-EXE3 = kmeansCUDA
-EXE4 = kmeansCUDA1D
-EXE5 = kmeansCUDA2
-EXE = $(EXE1) $(EXE2) $(EXE3) $(EXE4) $(EXE5)
+#EXE3 = kmeansCUDA
+EXE3 =
+#EXE4 = kmeansCUDA1D
+#EXE5 = kmeansCUDA2
+#EXE6 = kmeansCUDARF
+EXE = $(EXE1) $(EXE2)# $(EXE3) $(EXE4) $(EXE5) $(EXE6)
 OBJS1 = cluster.o getopt.o kmeans.o kmeans_clustering.o
 OBJS2 = cluster1D.o getopt.o kmeans1D.o kmeans_clustering1D.o
 OBJS3 = cluster.o getopt.o kmeans.o kmeans_clusteringCUDA.o
 OBJS4 = cluster1D.o getopt.o kmeans1D.o kmeans_clusteringCUDA1D.o
 OBJS5 = cluster.o getopt.o kmeans.o kmeans_clusteringCUDA2.o
-OBJS = $(OBJS1) $(OBJS2) $(OBJ3) $(OBJS4) $(OBJS5)
+OBJS6 = cluster.o getopt.o kmeans.o kmeans_clusteringCUDARF.o
+OBJS = $(OBJS1) $(OBJS2) $(OBJ3) $(OBJS4) $(OBJS5) $(OBJS6)
 
 .PHONY: all
 all: $(EXE)
@@ -24,8 +27,11 @@ kmeans_clusteringCUDA1D.o: kmeans_clustering1D.c
 	nvcc kmeans_clustering1D.cu -c -o $@ -DCUDA -arch=sm_60
 	rm kmeans_clustering1D.cu
 
-kmeans_clusteringCUDA2.o: kmeans_clusteringCUDA.cu
+kmeans_clusteringCUDA2.o: kmeans_clusteringCUDA.cu CUDAhelper.h
 	nvcc $< -o $@ -c -DAT -arch=sm_60
+
+kmeans_clusteringCUDARF.o: kmeans_clusteringCUDA.cu CUDAhelper.h
+	nvcc $< -o $@ -c -DRF -arch=sm_60
 
 $(EXE1): $(OBJS1)
 
@@ -38,6 +44,9 @@ $(EXE4): $(OBJS4)
 	clang++ -O2 -fopenmp -I/home/pschen/llvm/thesis/build-Debug/include $^ -lcuda -L/usr/local/cuda/lib64 -lcudart -o $@
 
 $(EXE5): $(OBJS5)
+	clang++ -O2 -fopenmp -I/home/pschen/llvm/thesis/build-Debug/include $^ -lcuda -L/usr/local/cuda/lib64 -lcudart -o $@
+
+$(EXE6): $(OBJS6)
 	clang++ -O2 -fopenmp -I/home/pschen/llvm/thesis/build-Debug/include $^ -lcuda -L/usr/local/cuda/lib64 -lcudart -o $@
 
 .PHONY: clean

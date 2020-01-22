@@ -80,6 +80,8 @@
 #define FLT_MAX 3.40282347e+38
 #endif
 
+#define CUDA_ERROR_CHECK
+#include "/home/pschen/sslab/src-pschen/omp_offloading/include/cuda_check.h"
 extern double wtime(void);
 
 int find_nearest_point(float *pt,                  /* [nfeatures] */
@@ -176,6 +178,8 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
             partial_new_centers[i][j] =
                 (float *)calloc(nfeatures, sizeof(float));
     }
+
+    //double tt = 0,t0 = 0, t1 = 0,t2 = 0 ,t3 = 0;
 #ifdef OMP_OFFLOAD
 #pragma omp target enter data map(to: feature[:npoints], clusters[:nclusters], membership[:npoints], partial_new_centers[:nthreads], partial_new_centers_len[:nthreads])
 #pragma omp target enter data map(to: feature[0][:nfeatures*npoints])
@@ -189,6 +193,7 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
 
 #ifdef OMP_OFFLOAD
         for (i = 0; i < nclusters; i++) {
+#pragma omp target enter data map(to: clusters[:nclusters][:nfeatures])
 #pragma omp target enter data map(to: clusters[i][:nfeatures])
         }
         for (i = 0; i < nthreads; i++) {
@@ -199,8 +204,7 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
         }
         {
             int tid = 0;
-#pragma omp target teams distribute parallel for private(i,j,index) reduction(+ : delta)
-
+#pragma omp target teams distribute parallel for private(i,j,index) reduction(+: delta)
 #else
 #pragma omp parallel shared(feature, clusters, membership,                     \
                             partial_new_centers, partial_new_centers_len)
@@ -214,8 +218,9 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
                 index = find_nearest_point(feature[i], nfeatures, clusters,
                                            nclusters);
                 /* if membership changes, increase delta by 1 */
-                if (membership[i] != index)
+                if (membership[i] != index) {
                     delta += 1.0;
+                }
 
                 /* assign the membership to object i */
                 membership[i] = index;
@@ -241,6 +246,7 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
 #pragma omp target exit data map(from: partial_new_centers[i][j][:nfeatures])
             }
         }
+//#pragma omp target exit data map(from: delta)
 #endif
 
         /* let the main thread perform the array reduction */
@@ -264,7 +270,23 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
             }
             new_centers_len[i] = 0; /* set back to 0 */
         }
+        printf("%d ", loop);
+        fflush(stdout);
     } while (delta > threshold && loop++ < 500);
+    // print kernel time
+
+
+    char tmp[3];
+    #pragma omp target map(tmp[4])
+    {
+        for (int i = 0; i < 4; i++) {
+            tmp[i] = i;
+        }
+    }
+
+//        tt += get_elapsed_ms(1);
+//        printf("t0 %lf t1 %lf t2 %lf t3 %lf\n", t0,  t1, t2, t3);
+//        printf("tt : %lf \n", tt);
 
     free(new_centers[0]);
     free(new_centers);
