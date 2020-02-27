@@ -15,6 +15,9 @@
 #include "backprop.h"
 #include <math.h>
 
+#ifdef OMP_AT
+#include "fake_at_runtime.h"
+#endif
 
 #define ABS(x) (((x) > 0.0) ? (x) : (-(x)))
 
@@ -233,6 +236,10 @@ int n1, n2;
     for (j = 0; j <= n1; j++) {
 #pragma omp target enter data map(always, to: conn[j][:n2+1])
     }
+
+#ifdef OMP_AT
+    FAKE_AT_RUNTIME_PRE_KERNEL;
+#endif
 #pragma omp target teams distribute private(k,j)
     // sum no need to reduction
 #else
@@ -246,7 +253,11 @@ int n1, n2;
         /*** Compute weighted sum of its inputs ***/
         float sum = 0.0;
         for (k = 0; k <= n1; k++) {
+#ifdef OMP_AT
+            sum += (float)AT(conn[k])[j] * l1[k];
+#else
             sum += conn[k][j] * l1[k];
+#endif
         }
         l2[j] = squash(sum);
     }
@@ -254,7 +265,6 @@ int n1, n2;
 #pragma omp target exit data map(always, from: l2[:n2+1])
 #endif
 }
-
 // extern "C"
 void bpnn_output_error(delta, target, output, nj, err) float *delta, *target,
     *output, *err;
@@ -310,6 +320,9 @@ int ndelta, nly;
     for (int k = 0; k <= nly; k++) {
 #pragma omp target enter data map(always, to: oldw[k][:ndelta+1], w[k][:ndelta+1])
     }
+#ifdef OMP_AT
+    FAKE_AT_RUNTIME_PRE_KERNEL;
+#endif
 #pragma omp target teams distribute private(j, k, new_dw), firstprivate(ndelta, nly)
 #else
     omp_set_num_threads(NUM_THREAD);
@@ -318,9 +331,15 @@ int ndelta, nly;
 #endif
     for (j = 1; j <= ndelta; j++) {
         for (k = 0; k <= nly; k++) {
+#ifdef OMP_AT
+            new_dw = ((ETA * delta[j] * ly[k]) + (MOMENTUM * AT(oldw[k])[j]));
+            AT(w[k])[j] += new_dw;
+            AT(oldw[k])[j] = new_dw;
+#else
             new_dw = ((ETA * delta[j] * ly[k]) + (MOMENTUM * oldw[k][j]));
             w[k][j] += new_dw;
             oldw[k][j] = new_dw;
+#endif
         }
     }
 

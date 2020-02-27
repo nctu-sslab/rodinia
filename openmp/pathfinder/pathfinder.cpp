@@ -5,6 +5,10 @@
 
 #include "timer.h"
 
+#ifdef OMP_AT
+#include "fake_at_runtime.h"
+#endif
+
 void run(int argc, char **argv);
 
 /* define timer macros */
@@ -84,11 +88,15 @@ void run(int argc, char **argv) {
       #pragma omp target enter data map(to: wall[i][:cols])
     }
 #endif
+    printf("Rows: %d\n", rows);
     for (int t = 0; t < rows - 1; t++) {
         temp = src;
         src = dst;
         dst = temp;
 #ifdef OMP_OFFLOAD
+#ifdef OMP_AT
+        FAKE_AT_RUNTIME_PRE_KERNEL;
+#endif
 #pragma omp target teams distribute parallel for private(min)
 #else
 #pragma omp parallel for private(min)
@@ -99,13 +107,24 @@ void run(int argc, char **argv) {
                 min = MIN(min, src[n - 1]);
             if (n < cols - 1)
                 min = MIN(min, src[n + 1]);
+#ifdef OMP_AT
+            dst[n] = AT(wall[t + 1])[n] + min;
+#else
             dst[n] = wall[t + 1][n] + min;
+#endif
+          //  tmp[n] = AT(wall[t+1]+n);
         }
+    //printf("wall: %d + min(src %d, %d) = dst[0]: %d -> tmp: %p vs %p\n", wall[t+1][0], src[0], src[1], dst[0], tmp[0], wall[t+1]);
+//    unsetenv("TABLE");
+//#define NNN 3
+    //printf("%p vs %p\n", tmp[NNN], wall[t+1]+NNN);
     }
 #ifdef OMP_OFFLOAD
     // retrieve data
 #pragma omp target exit data map (from: dst[:cols])
 #endif
+
+ //   printf("dst[0]: %d\n", dst[0]);
 
     pin_stats_pause(cycles);
     pin_stats_dump(cycles);
