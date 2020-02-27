@@ -80,20 +80,33 @@
 #define FLT_MAX 3.40282347e+38
 #endif
 
-#define CUDA_ERROR_CHECK
-#include "/home/pschen/sslab/src-pschen/omp_offloading/include/cuda_check.h"
+//#define CUDA_ERROR_CHECK
+//#include "cuda_check.h"
+#ifdef OMP_AT
+#include "fake_at_runtime.h"
+#endif
 extern double wtime(void);
 
+#ifdef OMP_AT
+int find_nearest_point(float *pt,                  /* [nfeatures] */
+                       int nfeatures, float **pts, /* [npts][nfeatures] */
+                       int npts, CALLEE_PARAM) {
+#else
 int find_nearest_point(float *pt,                  /* [nfeatures] */
                        int nfeatures, float **pts, /* [npts][nfeatures] */
                        int npts) {
+#endif
     int index, i;
     float min_dist = FLT_MAX;
 
     /* find the cluster center id with min distance to pt */
     for (i = 0; i < npts; i++) {
         float dist;
+#ifdef OMP_AT
+        dist = euclid_dist_2(pt, AT(pts[i]), nfeatures); /* no need square root */
+#else
         dist = euclid_dist_2(pt, pts[i], nfeatures); /* no need square root */
+#endif
         if (dist < min_dist) {
             min_dist = dist;
             index = i;
@@ -189,10 +202,14 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
 
     do {
         delta = 0.0;
+        printf("Kernel %d\n", loop);
 
 #ifdef OMP_OFFLOAD
+#pragma omp target enter data map(to: clusters[:nclusters][:nfeatures], \
+        partial_new_centers[:nthreads][:nclusters][:nfeatures], partial_new_centers_len[:nthreads][:nclusters])
+
+#pragma omp target enter data map(to: clusters[:nclusters], partial_new_centers[:nthreads], partial_new_centers_len[:nthreads])
         for (i = 0; i < nclusters; i++) {
-#pragma omp target enter data map(to: clusters[:nclusters][:nfeatures])
 #pragma omp target enter data map(to: clusters[i][:nfeatures])
         }
         for (i = 0; i < nthreads; i++) {
@@ -201,8 +218,13 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
 #pragma omp target enter data map(to: partial_new_centers[i][j][:nfeatures])
             }
         }
+
+
         {
             int tid = 0;
+#ifdef OMP_AT
+            FAKE_AT_RUNTIME_PRE_KERNEL;
+#endif
 #pragma omp target teams distribute parallel for private(i,j,index) reduction(+: delta)
 #else
 #pragma omp parallel shared(feature, clusters, membership,                     \
@@ -214,8 +236,13 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
 #endif
             for (i = 0; i < npoints; i++) {
                 /* find the index of nestest cluster centers */
+#ifdef OMP_AT
+                index = find_nearest_point(AT(feature[i]), nfeatures, AT(clusters),
+                                           nclusters, CALLER_ARG);
+#else
                 index = find_nearest_point(feature[i], nfeatures, clusters,
                                            nclusters);
+#endif
                 /* if membership changes, increase delta by 1 */
                 if (membership[i] != index) {
                     delta += 1.0;
@@ -227,10 +254,18 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
                 /* update new cluster centers : sum of all objects located
                        within */
 #pragma omp atomic
+#ifdef OMP_AT
+                AT(partial_new_centers_len[tid])[index]++;
+#else
                 partial_new_centers_len[tid][index]++;
+#endif
                 for (j = 0; j < nfeatures; j++)
 #pragma omp atomic
+#ifdef OMP_AT
+                    AT(AT(partial_new_centers[tid])[index])[j] += AT(feature[i])[j];
+#else
                     partial_new_centers[tid][index][j] += feature[i][j];
+#endif
             }
         }
 

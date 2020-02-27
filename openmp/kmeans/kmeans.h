@@ -49,6 +49,12 @@ int cluster(int, int, float **, int, float, float ***);
 /* kmeans_clustering.c */
 float **kmeans_clustering(float **, int, int, int, float, int *);
 float euclid_dist_2(float *, float *, int);
+
+#ifdef OMP_AT
+//#include "fake_at_runtime.h"
+//int find_nearest_point(float *pt, int nfeatures, float **pts, int npts, CALLEE_PARAM);
+#else
 int find_nearest_point(float *, int, float **, int);
+#endif
 
 #endif
