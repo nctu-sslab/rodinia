@@ -1,10 +1,10 @@
 OPENMP_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 include $(OPENMP_DIR)/../common.mk
 
-OMPFLAGS = -fopenmp -I/home/pschen/llvm/thesis/build-Debug/include
+OMPFLAGS = -fopenmp -I$(LLVM_BUILD_PATH)/include
 
 CFLAGS   += $(OMPFLAGS)
-CXXFLAGS   += $(OMPFLAGS) -D__FUCK_FOR_THESIS__
+CXXFLAGS   += $(OMPFLAGS) -D__FUCK_FOR_THESIS__ -D__FOR_PSCHEN_THESIS
 LDLIBS   += $(OMPFLAGS)
 
 ifdef OFFLOAD
