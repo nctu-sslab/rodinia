@@ -31,7 +31,7 @@ void init(int argc, char **argv) {
 
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
-            wall[i*rows + j] = rand() % 10;
+            wall[i*cols + j] = rand() % 10;
         }
     }
     for (int j = 0; j < cols; j++)
@@ -43,7 +43,7 @@ void init(int argc, char **argv) {
         fprintf(file, "wall:\n");
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
-                fprintf(file, "%d ", wall[i*rows+j]);
+                fprintf(file, "%d ", wall[i*cols+j]);
             }
             fprintf(file, "\n");
         }
@@ -92,7 +92,7 @@ void run(int argc, char **argv) {
                 min = MIN(min, src[n - 1]);
             if (n < cols - 1)
                 min = MIN(min, src[n + 1]);
-            dst[n] = wall[(t + 1)*rows+n] + min;
+            dst[n] = wall[(t + 1)*cols+n] + min;
         }
     }
 #ifdef OMP_OFFLOAD
