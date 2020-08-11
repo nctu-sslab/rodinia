@@ -20,8 +20,8 @@ def parse(outputs, result):
             elif len(words) == 0:
                 return
             else:
-                print("Unknown data format")
+                print("[libtarget_parser] Unknown data format")
                 print(line)
-    if len(out) < 1:
-        print("No result parsed")
+    #if len(out) < 1:
+        #print("No result parsed")
     outputs.prof_datas.append(out)
