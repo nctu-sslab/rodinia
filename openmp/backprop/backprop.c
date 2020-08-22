@@ -148,11 +148,15 @@ BPNN *bpnn_internal_create(n_in, n_hidden, n_out) int n_in, n_hidden, n_out;
     newnet->output_delta = alloc_1d_dbl(n_out + 1);
     newnet->target = alloc_1d_dbl(n_out + 1);
 
+    DC_BEGIN()
     newnet->input_weights = alloc_2d_dbl(n_in + 1, n_hidden + 1);
     newnet->hidden_weights = alloc_2d_dbl(n_hidden + 1, n_out + 1);
+    DC_END()
 
+    DC_BEGIN()
     newnet->input_prev_weights = alloc_2d_dbl(n_in + 1, n_hidden + 1);
     newnet->hidden_prev_weights = alloc_2d_dbl(n_hidden + 1, n_out + 1);
+    DC_END()
 
     return (newnet);
 }
@@ -229,6 +233,10 @@ int n1, n2;
     /*** Set up thresholding unit ***/
     l1[0] = 1.0;
 #ifdef OMP_OFFLOAD
+#ifdef OMP_DCAT
+#pragma omp target enter data map(always, to: l1[:n1+1], l2[:n2+1],\
+        conn)
+#else
 #ifdef OMP_DC
 #pragma omp target enter data map(always, to: l1[:n1+1], l2[:n2+1],\
         conn[:n1+1][:n2+1])
@@ -237,6 +245,7 @@ int n1, n2;
     for (j = 0; j <= n1; j++) {
 #pragma omp target enter data map(always, to: conn[j][:n2+1])
     }
+#endif
 #endif
 #pragma omp target teams distribute private(k,j)
     // sum no need to reduction
@@ -311,6 +320,10 @@ int ndelta, nly;
     // momentum = 0.3;
 
 #ifdef OMP_OFFLOAD
+#ifdef OMP_DCAT
+#pragma omp target enter data map(always, to: delta[:ndelta+1], ly[:nly+1],\
+       oldw, w)
+#else
 #ifdef OMP_DC
 #pragma omp target enter data map(always, to: delta[:ndelta+1], ly[:nly+1],\
        oldw[:nly+1][:ndelta+1], w[:nly+1][:ndelta+1])
@@ -319,6 +332,7 @@ int ndelta, nly;
     for (int k = 0; k <= nly; k++) {
 #pragma omp target enter data map(always, to: oldw[k][:ndelta+1], w[k][:ndelta+1])
     }
+#endif
 #endif
 #pragma omp target teams distribute private(j, k, new_dw), firstprivate(ndelta, nly)
 #else
@@ -335,6 +349,10 @@ int ndelta, nly;
     }
 
 #ifdef OMP_OFFLOAD
+#ifdef OMP_DCAT
+#pragma omp target exit data map(always, from: delta[:ndelta+1], ly[:nly+1])
+#pragma omp target exit data map(always, from: w)
+#else
 #ifdef OMP_DC
 #pragma omp target exit data map(always, from: delta[:ndelta+1], ly[:nly+1])
 #pragma omp target exit data map(always, from: w[:nly+1][:ndelta+1])
@@ -344,6 +362,7 @@ int ndelta, nly;
 #pragma omp target exit data map(always, from: w[k][:ndelta+1])
         // oldw is not used later
     }
+#endif
 #endif
 #endif
 }

@@ -3,6 +3,7 @@
 
 #define BIGRND 0x7fffffff
 
+#include "rodinia.h"
 
 #define ETA 0.3 // eta value
 #define MOMENTUM 0.3 // momentum value
