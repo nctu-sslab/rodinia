@@ -15,6 +15,7 @@ import libtarget_parser
 from dataTy import dataTy
 from dataTy import resultTy
 from dataTy import Output
+from dataTy import IRstats
 
 # global config
 class Config:
@@ -57,8 +58,8 @@ class Test:
     def run (self, projs, result):
         print(self.name)
 
-        # init result
-        self.result = resultTy()
+        # init outputs
+        self.outputs = {}
         for proj in projs:
             os.chdir(self.root)
             # Real run
@@ -69,10 +70,27 @@ class Test:
                 cprint("\b\b\b\b{0}    ".format(output.getError()), 'red')
             else:
                 cprint("\b\b\b\bPass   ", 'green')
-            self.result[proj] = output
-
-        result[self.name] = self.result
-
+            self.collect_ir_stats(output)
+            self.outputs[proj] = output
+        result[self.name] = self.outputs
+    def collect_ir_stats(self, output):
+        stats_file = '/tmp/AT_stats.txt'
+        if not os.path.exists(stats_file):
+            return
+        with open(stats_file, 'r') as out:
+            stats = out.read()
+        for line in stats.splitlines():
+            if len(line) < 7:
+                print("stats line less than 7")
+                continue
+            words = line.split()
+            fname = words[0]
+            inst = int(words[2])
+            ats = int(words[4])
+            fakes = int(words[6])
+            stats = IRstats(fname,inst,ats,fakes)
+            output.ir_stats.append(stats)
+        os.remove(stats_file)
     def runOnProj(self, proj):
         output = Output()
 
@@ -218,9 +236,9 @@ def run_cpu8():
 ######################################################################
 
 def run_omp():
-    opt2 = Opt()
-    opt2.env["OFFLOAD"] = "1"
-    return Test("omp-offload", os.path.join(rodinia_root, "openmp"), opt2)
+    opt = Opt()
+    opt.env["OFFLOAD"] = "1"
+    return Test("omp-offload", os.path.join(rodinia_root, "openmp"), opt)
 
 def run_dce():
     opt_dce = Opt()
@@ -230,60 +248,81 @@ def run_dce():
     return Test("omp-dce", os.path.join(rodinia_root, "openmp"), opt_dce)
 
 def run_bulk():
-    opt3 = Opt()
-    opt3.env["OFFLOAD"] = "1"
-    opt3.env["OMP_BULK"] = "1"
-    return Test("omp-offload-bulk", os.path.join(rodinia_root, "openmp"), opt3)
+    opt = Opt()
+    opt.env["OFFLOAD"] = "1"
+    opt.env["OMP_BULK"] = "1"
+    return Test("omp-offload-bulk", os.path.join(rodinia_root, "openmp"), opt)
 
 def run_dce_bulk():
-    opt3 = Opt()
-    opt3.env["OFFLOAD"] = "1"
-    opt3.env["OMP_BULK"] = "1"
-    opt3.env["DC"] = "1"
-    return Test("dce-bulk", os.path.join(rodinia_root, "openmp"), opt3)
+    opt = Opt()
+    opt.env["OFFLOAD"] = "1"
+    opt.env["OMP_BULK"] = "1"
+    opt.env["DC"] = "1"
+    return Test("dce-bulk", os.path.join(rodinia_root, "openmp"), opt)
 
 def run_bulk_host_shadow():
-    opt3 = Opt()
-    opt3.env["OFFLOAD"] = "1"
-    opt3.env["OMP_BULK"] = "1"
-    opt3.env["DC"] = "1"
-    opt3.env["OMP_HOSTSHADOW"] = "1"
-    return Test("dce-bulk-host-shadow", os.path.join(rodinia_root, "openmp"), opt3)
+    opt = Opt()
+    opt.env["OFFLOAD"] = "1"
+    opt.env["OMP_BULK"] = "1"
+    opt.env["DC"] = "1"
+    opt.env["OMP_HOSTSHADOW"] = "1"
+    return Test("dce-bulk-host-shadow", os.path.join(rodinia_root, "openmp"), opt)
 
 def run_at():
-    opt4 = Opt()
-    opt4.env["OFFLOAD"] = "1"
-    opt4.env["OMP_BULK"] = "1"
-    opt4.env["OMP_AT"] = "1"
-    return Test("omp-offload-at", os.path.join(rodinia_root, "openmp"), opt4)
+    opt = Opt()
+    opt.env["OFFLOAD"] = "1"
+    opt.env["OMP_BULK"] = "1"
+    opt.env["OMP_AT"] = "1"
+    return Test("omp-offload-at", os.path.join(rodinia_root, "openmp"), opt)
 
 def run_dce_at():
-    opt4 = Opt()
-    opt4.env["OFFLOAD"] = "1"
-    opt4.env["OMP_BULK"] = "1"
-    opt4.env["OMP_AT"] = "1"
-    opt4.env["DC"] = "1"
-    return Test("dce-at", os.path.join(rodinia_root, "openmp"), opt4)
+    opt = Opt()
+    opt.env["OFFLOAD"] = "1"
+    opt.env["OMP_BULK"] = "1"
+    opt.env["OMP_AT"] = "1"
+    opt.env["DC"] = "1"
+    return Test("dce-at", os.path.join(rodinia_root, "openmp"), opt)
 
 def run_maskat():
     opt = Opt()
     opt.env["OFFLOAD"] = "1"
     opt.env["OMP_MASK"] = "1"
-    #opt.env["DC"] = "1"
+    opt.env["OMP_NOFL"] = "1"
     return Test("omp-mask-at", os.path.join(rodinia_root, "openmp"), opt)
 
-def run_naive_at():
+def run_maskat_nofl():
     opt = Opt()
     opt.env["OFFLOAD"] = "1"
-    opt.env["OMP_BULK"] = "1"
-    opt.env["OMP_NAIVE_AT"] = "1"
-    opt.env["OMP_AT"] = "1"
-    return Test("omp-offload-at-naive", os.path.join(rodinia_root, "openmp"), opt)
+    opt.env["OMP_MASK"] = "1"
+    opt.env["OMP_NOFL"] = "1"
+    #opt.env["DC"] = "1"
+    return Test("omp-mask-nofl", os.path.join(rodinia_root, "openmp"), opt)
+
+def run_offsetat():
+    opt = Opt()
+    opt.env["OFFLOAD"] = "1"
+    opt.env["OMP_OFFSET"] = "1"
+    opt.env["OMP_NOFL"] = "1"
+    return Test("omp-offset-at", os.path.join(rodinia_root, "openmp"), opt)
+
+def run_offsetat_cm():
+    opt = Opt()
+    opt.env["OFFLOAD"] = "1"
+    opt.env["OMP_OFFSET"] = "1"
+    opt.env["OMP_NOFL"] = "1"
+    opt.env["OMP_OFFSET_CM"] = "1"
+    return Test("omp-offset-at-cm", os.path.join(rodinia_root, "openmp"), opt)
+
+def run_uvm():
+    opt = Opt()
+    opt.env["OFFLOAD"] = "1"
+    opt.env["OMP_UVM"] = "1"
+    return Test("omp-uvm", os.path.join(rodinia_root, "openmp"), opt)
 
 def run_cuda():
-    opt5 = Opt()
-    opt5.cuda = True
-    return Test("cuda", os.path.join(rodinia_root, "cuda"), opt5)
+    opt = Opt()
+    opt.cuda = True
+    return Test("cuda", os.path.join(rodinia_root, "cuda"), opt)
 
 # Change to refactor
 def run_refactor():
@@ -298,37 +337,38 @@ def Setup():
     Tests = []
 
     poly_projs = ["2mm", "3mm", "atax", "bicg", "doitgen", "gemm", "gemver", "correlation", "covariance", "fdtd-apml", "convolution-2d", "reg_detect"]
-    rodinia_projs = ["backprop", "kmeans", "myocyte", "pathfinder", "streamcluster"]
+    poly_projs = ["2mm", "3mm", "atax", "bicg", "doitgen", "gemm", "gemver", "correlation", "covariance", "convolution-2d", "reg_detect"]
+    rodinia_projs = ["backprop", "kmeans", "myocyte", "pathfinder"]
+    #, "streamcluster"]
     rodinia_projs_no_atomic = ["backprop", "myocyte", "pathfinder"]
+
 
     ###################### Run mode options ###########################
     #Config.dry_run = True
-    #Config.verifying = 1
+    #Config.verifying = True
     #Config.enalbeProfile = False
     #Config.runStdSize = True
+    Config.test_count = 4
     ###################################################################
 
-    # Testing projects
+    ##################### Testing projects ############################
     projects = poly_projs
-    #projects = ["2mm"]
-    #projects = ["backprop", "myocyte"]
-    #projects = ["pathfinder"]
+    projects = rodinia_projs_no_atomic
+    projects = ["myocyte", "pathfinder", "kmeans", "backprop"]
+    projects = rodinia_projs
+    projects = ["myocyte", "kmeans", "pathfinder"]
+    projects = ["pathfinder"]
+    #projects = poly_projs + rodinia_projs
 
-    #projects = rodinia_projs
+    ###################################################################
 
     # Final result
-    Config.test_count = 2
-    #Tests.append(run_cuda)
-    #Tests.append(run_bulk)
-    #Tests.append(run_at)
-    #Tests.append(run_dce)
-    #Tests.append(run_bulk_host_shadow)
-
-    Tests.append(run_omp)
-    Tests.append(run_dce_bulk)
-    Tests.append(run_dce_at)
+    #Tests.append(run_omp)
+    #Tests.append(run_refactor)
     Tests.append(run_maskat)
-    Tests.append(run_refactor)
+    #Tests.append(run_offsetat)
+    #Tests.append(run_offsetat_cm)
+    #Tests.append(run_uvm)
 
     #Tests.append(run_cpu1)
     #Tests.append(run_cpu2)
@@ -336,9 +376,17 @@ def Setup():
     #Tests.append(run_cpu8)
 
     #Tests.clear()
-    #Tests.append(run_maskat)
 
     return Tests , projects
+# Old configs
+    #Tests.append(run_cuda)
+    #Tests.append(run_bulk)
+    #Tests.append(run_at)
+    #Tests.append(run_dce)
+    #Tests.append(run_bulk_host_shadow)
+
+    #Tests.append(run_dce_bulk)
+    #Tests.append(run_dce_at)
 
 def Pickle(Result):
     # save result to pickle
@@ -347,10 +395,12 @@ def Pickle(Result):
     timestamp = now.strftime("%m_%d_%H_%M")
     pickle_file = "./results/result_" + timestamp + ".p"
     with open(pickle_file, "wb") as f:
+        Result.pickle_path = pickle_file
         pickle.dump(Result, f)
     # save as last result
     pickle_file = "./results/result.p"
     with open(pickle_file, "wb") as f:
+        Result.pickle_path = pickle_file
         pickle.dump(Result, f)
 
 project_path = {}
@@ -383,11 +433,10 @@ cuda_project_path["fdtd-apml"] = cuda_polybench_path + "stencils/fdtd-apml/"
 cuda_project_path["convolution-2d"] = cuda_polybench_path + "stencils/convolution-2d/"
 cuda_project_path["reg_detect"] = cuda_polybench_path + "medley/reg_detect/"
 
-Result = resultTy()
 script_dir = os.path.dirname(os.path.realpath(__file__))
 rodinia_root = os.path.dirname(script_dir)
 
-def main():
+def main(Result):
     # Moving
     os.chdir(rodinia_root)
 
@@ -432,8 +481,9 @@ def main():
     Pickle(Result)
 
 if __name__ == "__main__":
+    Result = resultTy()
     try:
-        main()
+        main(Result)
     except:
         print("Exception occurred")
         Pickle(Result)

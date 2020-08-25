@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import statistics
+import numpy
 
 class dataTy:
     Name = ""
@@ -45,13 +46,16 @@ class Output:
         self.prof_data = {}
         #self.nvprof_data = {}
         self.prof_time = 0
-        
+
         # Standard Deviation
         self.stdev_time = 0
         self.stdev_prof_time = 0
         # stderr of profiling mode
         # TODO
         self.logs = []
+        self.ir_stats = [] # store IRstats
+
+
     def hasError(self, ret = 0):
         if ret != 0 or self.CE or self.RE or self.TL or self.TL or self.Failed:
             self.Error = True
@@ -70,11 +74,11 @@ class Output:
     def getErrorOrAvgTime(self):
         if self.hasError() == True:
             return self.getError()
-        return sum(self.times)/ len(self.times)
+        return getAvgInStdev(self.times)
 
 class resultTy(dict):
     pickle_path = ""
-    
+
 def getAvg(flist):
     if len(flist) < 1:
         return 0.0
@@ -83,13 +87,49 @@ def getAvg(flist):
     for s in flist:
         sum += s
     return sum / n
+def getAvgInStdev(vals):
+    if len(vals) < 1:
+        return 0.0
+    if len(vals) < 3:
+        return sum(vals) / len(vals)
+    arr = numpy.array(vals)
+
+    mean = numpy.mean(arr, axis=0)
+    sd = numpy.std(arr, axis=0)
+
+    threshold = 1.8 * sd
+    final_list = [x for x in vals if (x > mean - threshold)]
+    final_list = [x for x in final_list if (x < mean + threshold)]
+    diff = len(vals) - len(final_list)
+    if len(final_list) < 1:
+        print("[getAvgInStdev] All values fall out std")
+        return sum(vals) / len(vals)
+    print(diff,end='')
+    return sum(final_list) / len(final_list)
 
 def getStdev(num_list):
     if len(num_list) < 2:
         return 0.0
     return statistics.stdev(num_list)
-    
+
 class ResultHelper:
+    def sortProjs(projs):
+        poly_projs = ["2mm", "3mm", "atax", "bicg", "doitgen", "gemm", "gemver", "correlation", "covariance", "fdtd-apml", "convolution-2d", "reg_detect"]
+        rodinia_projs = ["backprop", "kmeans", "myocyte", "pathfinder", "streamcluster"]
+        std_result = poly_projs + rodinia_projs
+        unknown_list = []
+        result = {}
+        for p in projs:
+            if p in std_result:
+                index = std_result.index(p)
+                result[index] = p
+            else:
+                unknown_list.append(p)
+        ret = []
+        for f in sorted(result):
+            ret.append(result[f])
+        return ret + unknown_list
+
     # get Projs of first config
     def getProjs(result):
         if len(result) < 1:
@@ -103,7 +143,9 @@ class ResultHelper:
         ret = []
         for proj in projs:
             ret.append(proj)
-        return ret
+        if 'fdtd-apml' in ret: ret.remove('fdtd-apml')
+        if 'correlation' in ret: ret.remove('correlation')
+        return ResultHelper.sortProjs(ret)
     def getConfigs(result):
         if len(result) < 1:
             print("No result")
@@ -119,12 +161,12 @@ class ResultHelper:
             for proj in result[config]:
                 output = result[config][proj]
                 if output.hasError() == True:
-                    print(config + "-" + proj + " has error: " + output.getError())
+                    print('Error in {:20} {:20} {}'.format(config,proj,output.getError()))
         # Avg times
         for config in result:
             for proj in result[config]:
                 output = result[config][proj]
-                output.time = getAvg(output.times)
+                output.time = getAvgInStdev(output.times)
                 output.stdev_time = getStdev(output.times)
         # Avg profiling result
         for config in result:
@@ -133,7 +175,7 @@ class ResultHelper:
                 # avg time
                 output.prof_time = getAvg(output.prof_times)
                 output.stdev_prof_time = getStdev(output.prof_times)
-                
+
                 important_metric = ["Runtime", "Kernel", "H2DTransfer", "D2HTransfer", "UpdatePtr"]
 
                 if len(output.prof_datas) == 0:
@@ -142,23 +184,23 @@ class ResultHelper:
                     for m in important_metric:
                         pdata[m] = dataTy(m, 1, 0.0)
                     continue
-                    
+
                 # avg data
                 names = list(output.prof_datas[0].keys())
                 for name in names:
-                    the_sum = 0
+                    vals = []
                     for pdata in output.prof_datas:
-                        the_sum += pdata.get(name,dataTy()).Value
-                    val = the_sum / len(output.prof_datas)
+                        vals.append(pdata.get(name,dataTy()).Value)
+                    val = getAvgInStdev(vals)
                     count = output.prof_datas[0][name].Count
                     output.prof_data[name] = dataTy(name, count, val)
-                    
+
                 # Fill 0 to un-profiled important metrics
                 for m in important_metric:
                     pdata = output.prof_data
                     if pdata.get(m) == None:
                         pdata[m] = dataTy(m, 1, 0.0)
-                    
+
         # Do the nvprof data
         for config in result:
             for proj in result[config]:
@@ -167,15 +209,15 @@ class ResultHelper:
                     continue
                 nvprof_entries = list(output.nvprof_datas[0].keys())
                 # Do the kernel first
-                kernel_sum = 0
+                kernels = []
                 kernel_count = 0
                 # kernel time
                 for name in nvprof_entries:
                     if name[:7] == "kernel-":
                         for pdata in output.nvprof_datas:
-                            kernel_sum += pdata.get(name,dataTy()).Value
+                            kernels.append(pdata.get(name,dataTy()).Value)
                         kernel_count += output.nvprof_datas[0][name].Count
-                output.prof_data["GPU-kernel"] = dataTy("GPU-kernel", kernel_count, kernel_sum/len(output.nvprof_datas))
+                output.prof_data["GPU-kernel"] = dataTy("GPU-kernel", kernel_count, getAvgInStdev(kernels))
                 for name in nvprof_entries:
                     if name[:7] == "kernel-":
                         continue
@@ -193,7 +235,7 @@ class ResultHelper:
                 member = ["Kernel", "H2DTransfer", "D2HTransfer", "UpdatePtr"]
                 get = pdata.get("Runtime")
                 if get == None:
-                    #pdata["Runtime"] = dataTy("Runtime", 1, 0.0) 
+                    #pdata["Runtime"] = dataTy("Runtime", 1, 0.0)
                     continue
 
                 sumup = get.Value
@@ -223,7 +265,16 @@ class ResultHelper:
                 pdata = output.prof_data
                 AvgTime = getAvg(output.times)
                 pdata["Times"] = dataTy("Times", 1, AvgTime)
-        # sort the config??
+        # process ir stats
+        # One AT means two more cast instruction
+
+        for config in result:
+            for proj in result[config]:
+                output = result[config][proj]
+                if not hasattr(output, 'ir_stats'):
+                    continue
+                for stat in output.ir_stats: # store IRstats
+                    stat.inst_count -= stat.AT_count * 3
     def isInvalid(result):
         projs = ResultHelper.getProjs(result)
         configs = ResultHelper.getConfigs(result)
@@ -252,3 +303,19 @@ class ResultHelper:
                 else:
                     factors[p] = 100/sum
         return factors
+
+
+class IRstats:
+    fname = ""
+    inst_count = 0
+    AT_count = 0
+    fload_count = 0
+    def __init__(self, name = "", int1: int=0, int2: int=0, int3: int=0):
+        self.fname = name
+        self.inst_count = int1
+        self.AT_count = int2
+        self.fload_count = int3
+    def dump(self):
+        print(self.fname + " " + str(self.inst_count) + " " + str(self.AT_count) + " " + str(self.fload_count))
+
+
