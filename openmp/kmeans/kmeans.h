@@ -43,6 +43,8 @@
 #define FLT_MAX 3.40282347e+38
 #endif
 
+#include "rodinia.h"
+
 /* cluster.c */
 int cluster(int, int, float **, int, float, float ***);
 

@@ -24,6 +24,8 @@
 #include <limits.h>
 #include <omp.h>
 
+#include "rodinia.h"
+
 #ifdef ENABLE_PARSEC_HOOKS
 #include <hooks.h>
 #endif
@@ -866,14 +868,17 @@ float pkmedian(Points *points, long kmin, long kmax, long *kfinal, int pid,
 #endif
 
 #ifdef OMP_OFFLOAD
+#ifdef OMP_DCAT
+    printf("mapping points %p\n", points->p);
+#pragma omp target enter data map(always, to: points->p)
+    printf("mapping points end %p\n", points->p);
+#else
 #pragma omp target enter data map(always, to: points[:1])
 #pragma omp target enter data map(always, to: points->p[:points->num])
     for (int i = 0; i < points->num; i++) {
 #pragma omp target enter data map(always, to: points->p[i].coord[:points->dim])
     }
-// TODO Map the bulk
-//#pragma omp target enter data map(to: points->p[0].coord[:points->num*points->dim])
-//#pragma omp target enter data map(to: points->p[i].coord[:1])
+#endif
 #endif
     while (1) {
         d++;
@@ -931,7 +936,11 @@ float pkmedian(Points *points, long kmin, long kmax, long *kfinal, int pid,
 #endif
     }
 #ifdef OMP_OFFLOAD
+#ifdef OMP_DCAT
+    //FIXME
+#else
 #pragma omp target exit data map(always, from: points->p[:points->num])
+#endif
 #endif
 
     // clean up...
@@ -1010,6 +1019,7 @@ struct pkmedian_arg_t {
 void *localSearchSub(void *arg_) {
 
     pkmedian_arg_t *arg = (pkmedian_arg_t *)arg_;
+    printf("points: %p\n", arg->points);
     pkmedian(arg->points, arg->kmin, arg->kmax, arg->kfinal, arg->pid,
              arg->barrier);
 
@@ -1151,6 +1161,7 @@ void streamCluster(PStream *stream, long kmin, long kmax, int dim,
         exit(1);
     }
 
+    DC_BEGIN();
     Points points;
     points.dim = dim;
     points.num = chunksize;
@@ -1158,6 +1169,7 @@ void streamCluster(PStream *stream, long kmin, long kmax, int dim,
     for (int i = 0; i < chunksize; i++) {
         points.p[i].coord = &block[i * dim];
     }
+    DC_END();
 
 
     Points centers;

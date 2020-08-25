@@ -165,12 +165,14 @@ int main(int argc, char **argv) {
 
 
         /* allocate space for attributes[] and read attributes of all objects */
+        DC_BEGIN();
         buf = (float *)malloc(numObjects * numAttributes * sizeof(float));
         attributes = (float **)malloc(numObjects * sizeof(float *));
         attributes[0] =
             (float *)malloc(numObjects * numAttributes * sizeof(float));
         for (i = 1; i < numObjects; i++)
             attributes[i] = attributes[i - 1] + numAttributes;
+        DC_END();
 
         read(infile, buf, numObjects * numAttributes * sizeof(float));
 
@@ -196,12 +198,14 @@ int main(int argc, char **argv) {
 
 
         /* allocate space for attributes[] and read attributes of all objects */
+        DC_BEGIN();
         buf = (float *)malloc(numObjects * numAttributes * sizeof(float));
         attributes = (float **)malloc(numObjects * sizeof(float *));
         attributes[0] =
             (float *)malloc(numObjects * numAttributes * sizeof(float));
         for (i = 1; i < numObjects; i++)
             attributes[i] = attributes[i - 1] + numAttributes;
+        DC_END();
         rewind(infile);
         i = 0;
         while (fgets(line, 1024, infile) != NULL) {

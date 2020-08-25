@@ -132,8 +132,10 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
     nthreads = omp_get_max_threads();
 
     /* allocate space for returning variable clusters[] */
+    DC_BEGIN();
     clusters = (float **)malloc(nclusters * sizeof(float *));
     clusters[0] = (float *)malloc(nclusters * nfeatures * sizeof(float));
+    DC_END();
     for (i = 1; i < nclusters; i++)
         clusters[i] = clusters[i - 1] + nfeatures;
 
@@ -149,14 +151,16 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
         membership[i] = -1;
 
     /* need to initialize new_centers_len and new_centers[0] to all 0 */
+    DC_BEGIN();
     new_centers_len = (int *)calloc(nclusters, sizeof(int));
 
     new_centers = (float **)malloc(nclusters * sizeof(float *));
     new_centers[0] = (float *)calloc(nclusters * nfeatures, sizeof(float));
     for (i = 1; i < nclusters; i++)
         new_centers[i] = new_centers[i - 1] + nfeatures;
+    DC_END();
 
-
+    DC_BEGIN();
     partial_new_centers_len = (int **)malloc(nthreads * sizeof(int *));
     partial_new_centers_len[0] =
         (int *)calloc(nthreads * nclusters, sizeof(int));
@@ -174,9 +178,13 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
             partial_new_centers[i][j] =
                 (float *)calloc(nfeatures, sizeof(float));
     }
+    DC_END();
 
 #ifdef OMP_OFFLOAD
-#ifdef OMP_DC
+#ifdef OMP_DCAT
+#pragma omp target enter data map(to: membership[:npoints])
+#pragma omp target enter data map(to: feature)
+#elif defined OMP_DC
 #pragma omp target enter data map(to: clusters[:nclusters], membership[:npoints], partial_new_centers[:nthreads], partial_new_centers_len[:nthreads])
     // TODO compare two method
 #if 1
@@ -197,7 +205,10 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
         delta = 0.0;
 
 #ifdef OMP_OFFLOAD
-#ifdef OMP_DC
+#ifdef OMP_DCAT
+#pragma omp target enter data map(to: clusters, partial_new_centers, \
+        partial_new_centers_len)
+#elif defined OMP_DC
 #pragma omp target enter data map(to: clusters[:nclusters][:nfeatures],\
         partial_new_centers[:nthreads][:nclusters][:nfeatures],\
         partial_new_centers_len[:nthreads][:nclusters])
@@ -246,7 +257,10 @@ float **kmeans_clustering(float **feature, /* in: [npoints][nfeatures] */
         }
 
 #ifdef OMP_OFFLOAD
-#ifdef OMP_DC
+#ifdef OMP_DCAT
+#pragma omp target exit data map(from: clusters, partial_new_centers,\
+        partial_new_centers_len)
+#elif defined OMP_DC
 #pragma omp target exit data map(from: clusters[:nclusters][:nfeatures], \
         partial_new_centers[:nthreads][:nclusters][:nfeatures],\
         partial_new_centers_len[:nthreads][:nclusters])

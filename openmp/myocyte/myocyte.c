@@ -152,6 +152,8 @@
 #include "file.c"
 #include "timer.c"
 
+#include "rodinia.h"
+
 //====================================================================================================100
 //	MAIN FUNCTION
 //====================================================================================================100
@@ -301,6 +303,7 @@ int main(int argc, char *argv[]) {
     // 	ALLOCATE ARRAYS
     //============================================================60
 
+    DC_BEGIN();
     y = (fp ***)malloc(workload * sizeof(fp **));
     for (i = 0; i < workload; i++) {
         y[i] = (fp **)malloc((1 + xmax) * sizeof(fp *));
@@ -308,16 +311,21 @@ int main(int argc, char *argv[]) {
             y[i][j] = (fp *)malloc(EQUATIONS * sizeof(fp));
         }
     }
+    DC_END();
 
+    DC_BEGIN();
     x = (fp **)malloc(workload * sizeof(fp *));
     for (i = 0; i < workload; i++) {
         x[i] = (fp *)malloc((1 + xmax) * sizeof(fp));
     }
+    DC_END();
 
+    DC_BEGIN();
     params = (fp **)malloc(workload * sizeof(fp *));
     for (i = 0; i < workload; i++) {
         params[i] = (fp *)malloc(PARAMETERS * sizeof(fp));
     }
+    DC_END();
 
     time2 = get_time();
 
@@ -374,7 +382,9 @@ int main(int argc, char *argv[]) {
         fp *mem = (fp*) malloc (mem_size * sizeof(fp));
 
 #ifdef OMP_OFFLOAD
-#ifdef OMP_DC
+#ifdef OMP_DCAT
+#pragma omp target enter data map(to: mem[:mem_size], x, y, params)
+#elif defined OMP_DC
 #pragma omp target enter data map(to: mem[:mem_size], x[:workload][:(1+xmax)], y[:workload][:(1+xmax)][:EQUATIONS], params[:workload][:PARAMETERS])
 #else
 #pragma omp target enter data map(to: mem[:mem_size], x[:workload], y[:workload], params[:workload])
@@ -397,7 +407,11 @@ int main(int argc, char *argv[]) {
             printf("STATUS: %d\n", status);
             return status;
         }
+#ifdef OMP_DC
 #pragma omp target exit data map(always, from: y[workload-1][xmax][:EQUATIONS])
+#elif defined OMP_DCAT
+#pragma omp target exit data map(always, from: y)
+#endif
     }
 
     /* TODO put this as verify*/

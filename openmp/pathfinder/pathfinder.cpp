@@ -4,6 +4,7 @@
 #include <assert.h>
 
 #include "timer.h"
+#include "rodinia.h"
 
 void run(int argc, char **argv);
 
@@ -25,10 +26,18 @@ void init(int argc, char **argv) {
         printf("Usage: pathfiner width num_of_steps\n");
         exit(0);
     }
+    DC_BEGIN();
+
+    data = (int*) malloc(rows * cols * sizeof(int));
+    wall = (int **)malloc(rows * sizeof(int*));
+    /*
     data = new int[rows * cols];
     wall = new int *[rows];
-    for (int n = 0; n < rows; n++)
+    */
+    DC_END();
+    for (int n = 0; n < rows; n++) {
         wall[n] = data + cols * n;
+    }
     result = new int[cols];
 
     srand(7);
@@ -79,7 +88,9 @@ void run(int argc, char **argv) {
 
     pin_stats_reset();
 #ifdef OMP_OFFLOAD
-#ifdef OMP_DC
+#ifdef OMP_DCAT
+    #pragma omp target enter data map (to: wall,src[:cols], dst[:cols])
+#elif defined OMP_DC
     #pragma omp target enter data map(to: wall[:rows][:cols])
     #pragma omp target enter data map (to: src[:cols], dst[:cols])
 #else
@@ -104,8 +115,9 @@ void run(int argc, char **argv) {
                 min = MIN(min, src[n - 1]);
             if (n < cols - 1)
                 min = MIN(min, src[n + 1]);
-            dst[n] = wall[t + 1][n] + min;
+            //dst[n] = wall[t + 1][n] + min;
         }
+        //printf("rows:%d i:%d\n", rows, t);
     }
 #ifdef OMP_OFFLOAD
     // retrieve data
@@ -131,8 +143,10 @@ void run(int argc, char **argv) {
         fclose(file);
     }
 
-    delete[] data;
-    delete[] wall;
+    free(data);
+    free(wall);
+    //delete[] data;
+    //delete[] wall;
     delete[] dst;
     delete[] src;
 }
